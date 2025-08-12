@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.EntityFrameworkCore;
 
 namespace ApiDeAnimes.Controllers
 {
@@ -42,7 +43,29 @@ namespace ApiDeAnimes.Controllers
             return Ok(animesList);
         }
 
-        [HttpGet("buscar um anime")]
+        [HttpGet("buscar um anime por nome")]
+        public async Task<ActionResult> buscarAnimePorNome(string nome)
+        {
+            var cache = await _Rcache.GetAsync($"Anime_{nome}");
+            if (cache != null)
+            {
+                var dataString = Encoding.UTF8.GetString(cache);
+                var animeCache = JsonSerializer.Deserialize<List<Anime>>(dataString);
+                return Ok(animeCache);
+            }
+            var anime = await _context.Animes.FirstOrDefaultAsync(m => m.anime == nome);
+            var serializedAnimes = JsonSerializer.Serialize(anime);
+            await _Rcache.SetAsync($"Anime_{nome}", Encoding.UTF8.GetBytes(serializedAnimes),
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10),
+                    SlidingExpiration = TimeSpan.FromMinutes(10)
+                });
+            
+            return Ok(anime);
+        }
+
+        [HttpGet("buscar um anime por id")]
         public async Task<ActionResult> BuscarAnimePorId(int id)
         {
             var cache = await _Rcache.GetAsync($"Anime_{id}");
@@ -68,13 +91,6 @@ namespace ApiDeAnimes.Controllers
                 });
 
             return Ok(animeFromDb);
-        }
-
-        [HttpGet("buscar um anime sem redis")]
-        public async Task<ActionResult> BuscarAnimePorIdSemRedis(int id)
-        {
-            var anime = await _context.Animes.FindAsync(id);
-            return Ok(anime);
         }
     }
 }

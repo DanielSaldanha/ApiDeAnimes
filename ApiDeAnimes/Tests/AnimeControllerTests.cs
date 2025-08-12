@@ -5,11 +5,12 @@ using Microsoft.AspNetCore.Mvc;
 using ApiDeAnimes.Controllers;
 using ApiDeAnimes.Models;
 using ApiDeAnimes.Data;
-using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Text.Json;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace ApiDeAnimes.Tests
 {
@@ -17,20 +18,33 @@ namespace ApiDeAnimes.Tests
     public class AnimeControllerTests
     {
         private Mock<IDistributedCache> _mockCache;
-        private AppDbContext _dbContext;
+        private Mock<AppDbContext> _mockContext;
+        private Mock<DbSet<Anime>> _mockSet;
         private AnimeController _controller;
 
         [SetUp]
         public void Setup()
         {
             _mockCache = new Mock<IDistributedCache>();
+            _mockContext = new Mock<AppDbContext>();
+            _mockSet = new Mock<DbSet<Anime>>();
 
-            var options = new DbContextOptionsBuilder<AppDbContext>()
-                .UseInMemoryDatabase(databaseName: "TestDatabase")
-                .Options;
+            _controller = new AnimeController(_mockContext.Object, _mockCache.Object);
+        }
 
-            _dbContext = new AppDbContext(options);
-            _controller = new AnimeController(_dbContext, _mockCache.Object);
+        private void SetupMockData(List<Anime> data)
+        {
+            var queryableData = data.AsQueryable();
+            _mockSet.As<IQueryable<Anime>>().Setup(m => m.Provider).Returns(queryableData.Provider);
+            _mockSet.As<IQueryable<Anime>>().Setup(m => m.Expression).Returns(queryableData.Expression);
+            _mockSet.As<IQueryable<Anime>>().Setup(m => m.ElementType).Returns(queryableData.ElementType);
+            _mockSet.As<IQueryable<Anime>>().Setup(m => m.GetEnumerator()).Returns(queryableData.GetEnumerator());
+
+            _mockContext.Setup(c => c.Animes).Returns(_mockSet.Object);
+
+            // Para FindAsync, você pode configurar o mock para retornar o item correto
+            _mockContext.Setup(c => c.Animes.FindAsync(It.IsAny<object[]>()))
+                .ReturnsAsync((object[] ids) => data.Find(a => a.Id == (int)ids[0]));
         }
 
         [Test]
@@ -64,8 +78,13 @@ namespace ApiDeAnimes.Tests
             _mockCache.Setup(x => x.GetAsync("Animes", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((byte[])null);
 
-            _dbContext.Animes.Add(new Anime { Id = 1, anime = "Naruto" });
-            _dbContext.SaveChanges();
+            var animesList = new List<Anime>
+            {
+                new Anime { Id = 1, anime = "Naruto" }
+            };
+
+            // Configure mock data
+            SetupMockData(animesList);
 
             // Act
             var result = await _controller.BuscarAnime();
@@ -75,7 +94,7 @@ namespace ApiDeAnimes.Tests
             Assert.IsNotNull(okResult);
             var animes = okResult.Value as List<Anime>;
             Assert.IsNotNull(animes);
-          //  Assert.Single(animes);
+           // Assert.Single(animes);
             Assert.AreEqual("Naruto", animes[0].anime);
 
             // Verifica se os dados foram armazenados no cache
@@ -109,8 +128,16 @@ namespace ApiDeAnimes.Tests
             _mockCache.Setup(x => x.GetAsync("Anime_1", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((byte[])null);
 
-            _dbContext.Animes.Add(new Anime { Id = 1, anime = "Naruto" });
-            _dbContext.SaveChanges();
+            var animesList = new List<Anime>
+            {
+                new Anime { Id = 1, anime = "Naruto" }
+            };
+
+            // Use the setup method to configure mock data
+            SetupMockData(animesList);
+
+            _mockContext.Setup(c => c.Animes.FindAsync(It.IsAny<object[]>()))
+.ReturnsAsync((object[] ids) => animesList.Find(a => a.Id == (int)ids[0]));
 
             // Act
             var result = await _controller.BuscarAnimePorId(1);
@@ -118,30 +145,12 @@ namespace ApiDeAnimes.Tests
             // Assert
             var okResult = result as OkObjectResult;
             Assert.IsNotNull(okResult);
-            var anime = okResult.Value as Anime;
-            Assert.IsNotNull(anime);
-            Assert.AreEqual("Naruto", anime.anime);
+            var animeResult = okResult.Value as Anime;
+            Assert.IsNotNull(animeResult);
+            Assert.AreEqual("Naruto", animeResult.anime);
 
             // Verifica se o anime foi armazenado no cache
             _mockCache.Verify(x => x.SetAsync("Anime_1", It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()), Times.Once);
-        }
-
-        [Test]
-        public async Task BuscarAnimePorIdSemRedis_ShouldReturnAnime()
-        {
-            // Arrange
-            _dbContext.Animes.Add(new Anime { Id = 1, anime = "Naruto" });
-            _dbContext.SaveChanges();
-
-            // Act
-            var result = await _controller.BuscarAnimePorIdSemRedis(1);
-
-            // Assert
-            var okResult = result as OkObjectResult;
-            Assert.IsNotNull(okResult);
-            var anime = okResult.Value as Anime;
-            Assert.IsNotNull(anime);
-            Assert.AreEqual("Naruto", anime.anime);
         }
     }
 }
